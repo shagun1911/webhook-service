@@ -10,7 +10,27 @@ const { enqueueWebhookJob } = require("./queue");
 const router = express.Router();
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-const APP_SECRET = String(process.env.APP_SECRET || process.env.META_APP_SECRET || "").trim();
+function collectAppSecrets() {
+  const csvSecrets = String(process.env.APP_SECRETS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const singleSecrets = [
+    process.env.APP_SECRET,
+    process.env.META_APP_SECRET,
+    process.env.INSTAGRAM_APP_SECRET,
+    process.env.FACEBOOK_APP_SECRET,
+    process.env.WHATSAPP_APP_SECRET
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  return [...new Set([...singleSecrets, ...csvSecrets])];
+}
+
+const APP_SECRETS = collectAppSecrets();
+
 router.get("/meta/webhook", (req, res) => {
   const providedToken = req.query["hub.verify_token"];
   const isTokenValid =
@@ -31,13 +51,14 @@ router.post("/meta/webhook", (req, res) => {
   const signatureSha1 = req.get("x-hub-signature");
   const rawBody = req.body;
 
-  const isSignatureValid = validateMetaSignature(rawBody, signature256, signatureSha1, APP_SECRET);
+  const isSignatureValid = APP_SECRETS.some((secret) =>
+    validateMetaSignature(rawBody, signature256, signatureSha1, secret)
+  );
   if (!isSignatureValid) {
     console.warn("[webhook] signature validation failed", {
       hasSha256: Boolean(signature256),
       hasSha1: Boolean(signatureSha1),
-      hasAppSecret: Boolean(APP_SECRET),
-      appSecretLength: APP_SECRET.length
+      configuredAppSecrets: APP_SECRETS.length
     });
     return res.status(401).send("Invalid signature");
   }

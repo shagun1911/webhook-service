@@ -123,6 +123,11 @@ function rebuildMappingsFromClients() {
 
       const routeKey = config.meta_id || buildServiceFallbackKey(serviceName);
       if (seenRouteKeys.has(routeKey)) {
+        if (!config.meta_id) {
+          throw new Error(
+            `Duplicate routing key for ${serviceName}. Add a unique Routing ID for each client on ${serviceName} to support multi-client routing.`
+          );
+        }
         throw new Error(`Duplicate routing key detected: ${routeKey}`);
       }
       seenRouteKeys.add(routeKey);

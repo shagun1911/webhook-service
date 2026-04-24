@@ -30,6 +30,10 @@ function buildServiceForm() {
         Enabled
       </label>
       <label>
+        Routing ID (Optional)
+        <input type="text" id="${service}-meta-id" placeholder="Meta page/account/phone id for multi-client routing" />
+      </label>
+      <label>
         Webhook URL
         <input type="url" id="${service}-callback-url" placeholder="https://your-app.com/api/meta/webhook" />
       </label>
@@ -51,7 +55,7 @@ function getClientPayload() {
   SERVICES.forEach((service) => {
     services[service] = {
       enabled: document.getElementById(`${service}-enabled`).checked,
-      meta_id: "",
+      meta_id: document.getElementById(`${service}-meta-id`).value.trim(),
       callback_url: document.getElementById(`${service}-callback-url`).value.trim(),
       token: document.getElementById(`${service}-token`).value.trim()
     };
@@ -123,6 +127,7 @@ function populateFormForEdit(client) {
   SERVICES.forEach((service) => {
     const cfg = client.services?.[service] || {};
     document.getElementById(`${service}-enabled`).checked = Boolean(cfg.enabled);
+    document.getElementById(`${service}-meta-id`).value = cfg.meta_id || "";
     document.getElementById(`${service}-callback-url`).value = cfg.callback_url || "";
     document.getElementById(`${service}-token`).value = cfg.token || "";
   });
@@ -135,7 +140,7 @@ function renderServiceDetails(services) {
       return `<li><strong>${SERVICE_LABELS[service]}</strong>: <span class="muted">disabled</span></li>`;
     }
 
-    return `<li><strong>${SERVICE_LABELS[service]}</strong>: webhook_url=${cfg.callback_url || "-"}, token=${cfg.token || "-"}</li>`;
+    return `<li><strong>${SERVICE_LABELS[service]}</strong>: route_id=${cfg.meta_id || `service:${service}`}, webhook_url=${cfg.callback_url || "-"}, token=${cfg.token || "-"}</li>`;
   }).join("");
 }
 
@@ -166,43 +171,6 @@ async function loadClients() {
     )
     .join("");
 
-  document.querySelectorAll(".edit-btn").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      const clientId = event.currentTarget.getAttribute("data-id");
-      if (!clientId) {
-        return;
-      }
-
-      const client = currentClients.find((item) => item.id === clientId);
-      if (!client) {
-        alert("Client not found");
-        return;
-      }
-
-      populateFormForEdit(client);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    });
-  });
-
-  document.querySelectorAll(".delete-btn").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      const clientId = event.currentTarget.getAttribute("data-id");
-      if (!clientId) {
-        return;
-      }
-
-      try {
-        await deleteClient(clientId);
-        if (editingClientId === clientId) {
-          resetForm();
-        }
-        setFormMessage("Client deleted successfully.", "success");
-        await loadClients();
-      } catch (error) {
-        setFormMessage(error.message, "error");
-      }
-    });
-  });
 }
 
 clientForm.addEventListener("submit", async (event) => {
@@ -227,6 +195,51 @@ clientForm.addEventListener("submit", async (event) => {
 
 cancelEditBtn.addEventListener("click", () => {
   resetForm();
+});
+
+clientsList.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const editBtn = target.closest(".edit-btn");
+  if (editBtn) {
+    const clientId = editBtn.getAttribute("data-id");
+    if (!clientId) {
+      return;
+    }
+    const client = currentClients.find((item) => item.id === clientId);
+    if (!client) {
+      setFormMessage("Client not found.", "error");
+      return;
+    }
+    populateFormForEdit(client);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  const deleteBtn = target.closest(".delete-btn");
+  if (deleteBtn) {
+    const clientId = deleteBtn.getAttribute("data-id");
+    if (!clientId) {
+      return;
+    }
+    const confirmed = window.confirm("Delete this client configuration?");
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await deleteClient(clientId);
+      if (editingClientId === clientId) {
+        resetForm();
+      }
+      await loadClients();
+      setFormMessage("Client deleted successfully.", "success");
+    } catch (error) {
+      setFormMessage(error.message, "error");
+    }
+  }
 });
 
 buildServiceForm();

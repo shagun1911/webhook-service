@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 const express = require("express");
-const path = require("path");
 const webhookRouter = require("./router");
 const adminRouter = require("./adminRouter");
 const { initProjectResolver, shutdownProjectResolver } = require("./projectResolver");
@@ -22,7 +21,14 @@ app.use(express.json({ limit: process.env.BODY_LIMIT || "1mb" }));
 
 app.use(webhookRouter);
 app.use("/api", adminRouter);
-app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (_req, res) => {
+  res.status(200).json({
+    name: "webhook-service",
+    mode: "api-only",
+    health: "/health"
+  });
+});
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });

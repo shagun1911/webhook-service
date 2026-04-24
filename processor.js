@@ -2,9 +2,18 @@ const axios = require("axios");
 
 const { getMapping } = require("./mapping");
 
-const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
+const INTERNAL_SECRET = String(process.env.INTERNAL_SECRET || "").trim();
 const REQUEST_TIMEOUT_MS = Number(process.env.FORWARD_TIMEOUT_MS || 8000);
 const MAX_FORWARD_ATTEMPTS = Number(process.env.FORWARD_MAX_ATTEMPTS || 3);
+const PLACEHOLDER_INTERNAL_SECRET = "REPLACE_WITH_INTERNAL_SHARED_SECRET";
+
+function assertInternalSecretConfigured() {
+  if (!INTERNAL_SECRET || INTERNAL_SECRET === PLACEHOLDER_INTERNAL_SECRET) {
+    throw new Error(
+      "INTERNAL_SECRET is not configured. Set the same strong shared secret in webhook gateway and downstream backend."
+    );
+  }
+}
 
 function getMetaIdFromEntry(entry) {
   if (entry && entry.id) {
@@ -38,6 +47,8 @@ function getServiceKey(payload, entry) {
 }
 
 async function forwardWithRetry(mapping, body, originalHeaders) {
+  assertInternalSecretConfigured();
+
   const outgoingHeaders = {
     "Content-Type": "application/json",
     "x-client-id": mapping.client_id,

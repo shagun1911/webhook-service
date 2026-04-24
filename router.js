@@ -10,7 +10,7 @@ const { enqueueWebhookJob } = require("./queue");
 const router = express.Router();
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-const APP_SECRET = process.env.APP_SECRET;
+const APP_SECRET = String(process.env.APP_SECRET || process.env.META_APP_SECRET || "").trim();
 router.get("/meta/webhook", (req, res) => {
   const providedToken = req.query["hub.verify_token"];
   const isTokenValid =

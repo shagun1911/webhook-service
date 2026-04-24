@@ -30,10 +30,6 @@ function buildServiceForm() {
         Enabled
       </label>
       <label>
-        Routing ID (Optional)
-        <input type="text" id="${service}-meta-id" placeholder="Meta page/account/phone id for multi-client routing" />
-      </label>
-      <label>
         Webhook URL
         <input type="url" id="${service}-callback-url" placeholder="https://your-app.com/api/meta/webhook" />
       </label>
@@ -55,7 +51,7 @@ function getClientPayload() {
   SERVICES.forEach((service) => {
     services[service] = {
       enabled: document.getElementById(`${service}-enabled`).checked,
-      meta_id: document.getElementById(`${service}-meta-id`).value.trim(),
+      meta_id: "",
       callback_url: document.getElementById(`${service}-callback-url`).value.trim(),
       token: document.getElementById(`${service}-token`).value.trim()
     };
@@ -127,7 +123,6 @@ function populateFormForEdit(client) {
   SERVICES.forEach((service) => {
     const cfg = client.services?.[service] || {};
     document.getElementById(`${service}-enabled`).checked = Boolean(cfg.enabled);
-    document.getElementById(`${service}-meta-id`).value = cfg.meta_id || "";
     document.getElementById(`${service}-callback-url`).value = cfg.callback_url || "";
     document.getElementById(`${service}-token`).value = cfg.token || "";
   });
@@ -140,7 +135,7 @@ function renderServiceDetails(services) {
       return `<li><strong>${SERVICE_LABELS[service]}</strong>: <span class="muted">disabled</span></li>`;
     }
 
-    return `<li><strong>${SERVICE_LABELS[service]}</strong>: route_id=${cfg.meta_id || `service:${service}`}, webhook_url=${cfg.callback_url || "-"}, token=${cfg.token || "-"}</li>`;
+    return `<li><strong>${SERVICE_LABELS[service]}</strong>: webhook_url=${cfg.callback_url || "-"}, token=${cfg.token || "-"}</li>`;
   }).join("");
 }
 

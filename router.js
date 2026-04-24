@@ -27,12 +27,18 @@ router.get("/meta/webhook", (req, res) => {
 });
 
 router.post("/meta/webhook", (req, res) => {
-  const signature = req.get("x-hub-signature-256");
+  const signature256 = req.get("x-hub-signature-256");
+  const signatureSha1 = req.get("x-hub-signature");
   const rawBody = req.body;
 
-  const isSignatureValid = validateMetaSignature(rawBody, signature, APP_SECRET);
+  const isSignatureValid = validateMetaSignature(rawBody, signature256, signatureSha1, APP_SECRET);
   if (!isSignatureValid) {
-    console.warn("[webhook] signature validation failed");
+    console.warn("[webhook] signature validation failed", {
+      hasSha256: Boolean(signature256),
+      hasSha1: Boolean(signatureSha1),
+      hasAppSecret: Boolean(APP_SECRET),
+      appSecretLength: APP_SECRET.length
+    });
     return res.status(401).send("Invalid signature");
   }
 

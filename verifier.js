@@ -35,22 +35,29 @@ function validateWebhookVerification(query, verifyToken) {
   return { ok: true, challenge };
 }
 
-function validateMetaSignature(rawBody, signatureHeader, appSecret) {
+function computeHmac(rawBody, appSecret, algorithm) {
+  return crypto.createHmac(algorithm, appSecret).update(rawBody).digest("hex");
+}
+
+function validateMetaSignature(rawBody, signatureHeader256, signatureHeaderSha1, appSecret) {
   if (!appSecret) {
     return false;
   }
 
-  if (!signatureHeader || !signatureHeader.startsWith("sha256=")) {
-    return false;
+  if (signatureHeader256 && signatureHeader256.startsWith("sha256=")) {
+    const expectedHash = computeHmac(rawBody, appSecret, "sha256");
+    const providedHash = signatureHeader256.slice("sha256=".length);
+    return safeCompareHex(expectedHash, providedHash);
   }
 
-  const expectedHash = crypto
-    .createHmac("sha256", appSecret)
-    .update(rawBody)
-    .digest("hex");
+  // Backward compatibility for providers still sending legacy SHA1 signature header.
+  if (signatureHeaderSha1 && signatureHeaderSha1.startsWith("sha1=")) {
+    const expectedHash = computeHmac(rawBody, appSecret, "sha1");
+    const providedHash = signatureHeaderSha1.slice("sha1=".length);
+    return safeCompareHex(expectedHash, providedHash);
+  }
 
-  const providedHash = signatureHeader.slice("sha256=".length);
-  return safeCompareHex(expectedHash, providedHash);
+  return false;
 }
 
 module.exports = {

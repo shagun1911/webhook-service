@@ -82,6 +82,12 @@ function validateEnabledServiceConfig(serviceName, serviceConfig, clientName) {
     return;
   }
 
+  if (!serviceConfig.meta_id) {
+    throw new Error(
+      `${clientName}: ${serviceName} requires Account ID (Instagram account ID / Page ID / phone_number_id)`
+    );
+  }
+
   if (!serviceConfig.callback_url) {
     throw new Error(`${clientName}: ${serviceName} requires callback_url when enabled`);
   }
@@ -123,9 +129,6 @@ function rebuildMappingsFromClients() {
 
       const routeKey = config.meta_id || buildServiceFallbackKey(serviceName);
       if (seenRouteKeys.has(routeKey)) {
-        if (!config.meta_id) {
-          throw new Error(`Only one enabled client is allowed for ${serviceName} in current setup.`);
-        }
         throw new Error(`Duplicate routing key detected: ${routeKey}`);
       }
       seenRouteKeys.add(routeKey);

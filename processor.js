@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const { getMapping } = require("./mapping");
+const { resolveProjectWebhook } = require("./projectResolver");
 
 const INTERNAL_SECRET = String(process.env.INTERNAL_SECRET || "").trim();
 const REQUEST_TIMEOUT_MS = Number(process.env.FORWARD_TIMEOUT_MS || 8000);
@@ -15,32 +15,27 @@ function assertInternalSecretConfigured() {
   }
 }
 
-function getMetaIdFromEntry(entry) {
-  if (entry && entry.id) {
-    return String(entry.id);
-  }
-
-  const phoneNumberId = entry?.changes?.[0]?.value?.metadata?.phone_number_id;
-  if (phoneNumberId) {
-    return String(phoneNumberId);
-  }
-
-  return null;
-}
-
-function getServiceKey(payload, entry) {
+function getRouteContext(payload, entry) {
   const objectType = String(payload?.object || "").toLowerCase();
-  if (objectType === "whatsapp_business_account") {
-    return "service:whatsapp";
-  }
 
   if (objectType === "instagram") {
-    return "service:instagram";
+    const receiverId = entry?.id ? String(entry.id) : null;
+    return receiverId ? { platform: "instagram", receiverId } : null;
+  }
+
+  if (objectType === "whatsapp_business_account") {
+    const phoneNumberId = entry?.changes?.[0]?.value?.metadata?.phone_number_id;
+    const receiverId = phoneNumberId ? String(phoneNumberId) : null;
+    return receiverId ? { platform: "whatsapp", receiverId } : null;
   }
 
   if (objectType === "page") {
     const isInstagramScoped = Boolean(entry?.changes?.[0]?.value?.instagram_account_id);
-    return isInstagramScoped ? "service:instagram" : "service:facebook";
+    const receiverId = entry?.id ? String(entry.id) : null;
+    if (!receiverId) {
+      return null;
+    }
+    return { platform: isInstagramScoped ? "instagram" : "facebook", receiverId };
   }
 
   return null;
@@ -89,17 +84,32 @@ async function processWebhookPayload(payload, requestHeaders) {
   }
 
   const tasks = entries.map(async (entry) => {
-    const metaId = getMetaIdFromEntry(entry);
-    const serviceKey = getServiceKey(payload, entry);
-    const mapping = (metaId && getMapping(metaId)) || (serviceKey && getMapping(serviceKey));
-    if (!mapping) {
+    const routeContext = getRouteContext(payload, entry);
+    if (!routeContext) {
+      console.warn("[webhook] could not derive route context from payload entry");
+      return;
+    }
+
+    const resolved = resolveProjectWebhook(routeContext.platform, routeContext.receiverId);
+    if (!resolved) {
       console.warn(
-        `[webhook] no mapping found for meta_id=${metaId || "-"} service_key=${serviceKey || "-"}`
+        `[webhook] no routing target found for platform=${routeContext.platform} receiver_id=${routeContext.receiverId}`
       );
       return;
     }
 
-    await forwardWithRetry(mapping, payload, requestHeaders);
+    console.info(
+      `[webhook] resolved project route project=${resolved.projectId} platform=${routeContext.platform} receiver_id=${routeContext.receiverId}`
+    );
+
+    await forwardWithRetry(
+      {
+        client_id: resolved.projectId,
+        forward_url: resolved.forwardUrl
+      },
+      payload,
+      requestHeaders
+    );
   });
 
   const results = await Promise.allSettled(tasks);

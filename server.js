@@ -4,6 +4,7 @@ const express = require("express");
 const path = require("path");
 const webhookRouter = require("./router");
 const adminRouter = require("./adminRouter");
+const { initProjectResolver, shutdownProjectResolver } = require("./projectResolver");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -32,6 +33,19 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Internal Server Error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`[server] webhook gateway listening on port ${PORT}`);
+initProjectResolver()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`[server] webhook gateway listening on port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("[server] failed to initialize resolver", error.message);
+    process.exit(1);
+  });
+
+process.on("SIGTERM", () => {
+  shutdownProjectResolver()
+    .catch(() => {})
+    .finally(() => process.exit(0));
 });

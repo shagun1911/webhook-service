@@ -6,6 +6,11 @@ const {
   updateClient,
   deleteClient
 } = require("./clientStore");
+const {
+  getResolverStats,
+  resolveProjectWebhook,
+  refreshRoutingIndex
+} = require("./projectResolver");
 
 const router = express.Router();
 
@@ -44,6 +49,32 @@ router.delete("/clients/:id", (req, res) => {
   }
 
   return res.status(204).send();
+});
+
+router.get("/routing/debug", (req, res) => {
+  const platform = String(req.query.platform || "").trim();
+  const receiverId = String(req.query.receiverId || "").trim();
+  const resolved = platform && receiverId ? resolveProjectWebhook(platform, receiverId) : null;
+
+  res.status(200).json({
+    resolver: getResolverStats(),
+    input: {
+      platform,
+      receiverId
+    },
+    resolved: resolved || null
+  });
+});
+
+router.post("/routing/refresh", async (_req, res) => {
+  try {
+    await refreshRoutingIndex();
+    res.status(200).json({
+      resolver: getResolverStats()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 module.exports = router;

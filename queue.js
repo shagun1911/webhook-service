@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { processWebhookPayload } = require("./processor");
+const { logError, logInfo, logWarn } = require("./logger");
 
 const queue = [];
 let processing = false;
@@ -22,6 +23,7 @@ function persistFailedEvent(job, error) {
   ensureFailedEventsStorage();
   const record = {
     failedAt: new Date().toISOString(),
+    traceId: job.traceId,
     attempts: job.attempts,
     error: error?.message || "Unknown processing error",
     payload: job.payload
@@ -53,18 +55,27 @@ async function processQueue() {
   try {
     while (queue.length > 0) {
       const job = queue.shift();
+      logInfo(job.traceId, "[queue] starting job", {
+        attempts: job.attempts,
+        queuedJobsRemaining: queue.length
+      });
       try {
-        await processWebhookPayload(job.payload, job.requestHeaders);
+        await processWebhookPayload(job.payload, job.requestHeaders, job.traceId);
+        logInfo(job.traceId, "[queue] job processed successfully");
       } catch (error) {
         job.attempts += 1;
         if (job.attempts >= MAX_JOB_ATTEMPTS) {
-          console.error("[queue] job permanently failed", error.message);
+          logError(job.traceId, "[queue] job permanently failed", {
+            error: error.message,
+            attempts: job.attempts
+          });
           persistFailedEvent(job, error);
         } else {
-          console.warn(
-            `[queue] job failed, retrying attempt=${job.attempts}/${MAX_JOB_ATTEMPTS}`,
-            error.message
-          );
+          logWarn(job.traceId, "[queue] job failed, scheduling retry", {
+            error: error.message,
+            attempt: job.attempts,
+            maxAttempts: MAX_JOB_ATTEMPTS
+          });
           scheduleRetry(job);
         }
       }
@@ -74,15 +85,20 @@ async function processQueue() {
   }
 }
 
-function enqueueWebhookJob(payload, requestHeaders) {
+function enqueueWebhookJob(payload, requestHeaders, traceId) {
   queue.push({
     payload,
     requestHeaders,
+    traceId,
     attempts: 0
   });
 
+  logInfo(traceId, "[queue] job enqueued", { queueLength: queue.length });
+
   processQueue().catch((error) => {
-    console.error("[queue] unexpected queue processing failure", error.message);
+    logError(traceId, "[queue] unexpected queue processing failure", {
+      error: error.message
+    });
   });
 }
 

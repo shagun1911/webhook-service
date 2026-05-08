@@ -1,6 +1,7 @@
 const axios = require("axios");
 
 const { resolveProjectWebhook } = require("./projectResolver");
+const { logError, logInfo, logWarn } = require("./logger");
 
 const INTERNAL_SECRET = String(process.env.INTERNAL_SECRET || "").trim();
 const REQUEST_TIMEOUT_MS = Number(process.env.FORWARD_TIMEOUT_MS || 8000);
@@ -41,7 +42,28 @@ function getRouteContext(payload, entry) {
   return null;
 }
 
-async function forwardWithRetry(mapping, body, originalHeaders) {
+function collectEventSummary(payload, entry) {
+  const objectType = String(payload?.object || "").toLowerCase();
+  const messagingEvents = Array.isArray(entry?.messaging) ? entry.messaging : [];
+  const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+  const firstMessaging = messagingEvents[0] || {};
+  const firstMessage = firstMessaging?.message || {};
+
+  return {
+    object: payload?.object || null,
+    entryId: entry?.id ? String(entry.id) : null,
+    entryTime: entry?.time || null,
+    messagingCount: messagingEvents.length,
+    changesCount: changes.length,
+    senderId: firstMessaging?.sender?.id ? String(firstMessaging.sender.id) : null,
+    recipientId: firstMessaging?.recipient?.id ? String(firstMessaging.recipient.id) : null,
+    mid: firstMessage?.mid || null,
+    textPreview: typeof firstMessage?.text === "string" ? firstMessage.text.slice(0, 100) : null,
+    isFacebookPageEvent: objectType === "page"
+  };
+}
+
+async function forwardWithRetry(mapping, body, originalHeaders, traceId) {
   assertInternalSecretConfigured();
 
   const outgoingHeaders = {
@@ -58,49 +80,81 @@ async function forwardWithRetry(mapping, body, originalHeaders) {
 
   for (let attempt = 1; attempt <= MAX_FORWARD_ATTEMPTS; attempt += 1) {
     try {
+      logInfo(traceId, "[forward] sending event to downstream", {
+        clientId: mapping.client_id,
+        forwardUrl: mapping.forward_url,
+        attempt,
+        maxAttempts: MAX_FORWARD_ATTEMPTS
+      });
       await axios.post(mapping.forward_url, body, {
         headers: outgoingHeaders,
         timeout: REQUEST_TIMEOUT_MS
       });
+      logInfo(traceId, "[forward] downstream accepted event", {
+        clientId: mapping.client_id,
+        forwardUrl: mapping.forward_url,
+        attempt
+      });
       return;
     } catch (error) {
       lastError = error;
-      console.error(
-        `[forward] attempt ${attempt}/${MAX_FORWARD_ATTEMPTS} failed for client=${mapping.client_id} url=${mapping.forward_url}`,
-        error.message
-      );
+      logError(traceId, "[forward] downstream request failed", {
+        clientId: mapping.client_id,
+        forwardUrl: mapping.forward_url,
+        attempt,
+        maxAttempts: MAX_FORWARD_ATTEMPTS,
+        error: error.message
+      });
     }
   }
 
   throw lastError;
 }
 
-async function processWebhookPayload(payload, requestHeaders) {
+async function processWebhookPayload(payload, requestHeaders, traceId) {
   const entries = Array.isArray(payload?.entry) ? payload.entry : [];
 
   if (entries.length === 0) {
-    console.warn("[webhook] payload has no entry array");
+    logWarn(traceId, "[webhook] payload has no entry array");
     return;
   }
 
-  const tasks = entries.map(async (entry) => {
+  logInfo(traceId, "[webhook] processing payload entries", {
+    object: payload?.object || null,
+    entryCount: entries.length
+  });
+
+  const tasks = entries.map(async (entry, index) => {
+    logInfo(traceId, "[webhook] evaluating entry", {
+      entryIndex: index,
+      summary: collectEventSummary(payload, entry)
+    });
+
     const routeContext = getRouteContext(payload, entry);
     if (!routeContext) {
-      console.warn("[webhook] could not derive route context from payload entry");
+      logWarn(traceId, "[webhook] could not derive route context from payload entry", {
+        entryIndex: index,
+        summary: collectEventSummary(payload, entry)
+      });
       return;
     }
 
     const resolved = resolveProjectWebhook(routeContext.platform, routeContext.receiverId);
     if (!resolved) {
-      console.warn(
-        `[webhook] no routing target found for platform=${routeContext.platform} receiver_id=${routeContext.receiverId}`
-      );
+      logWarn(traceId, "[webhook] no routing target found", {
+        platform: routeContext.platform,
+        receiverId: routeContext.receiverId,
+        entryIndex: index
+      });
       return;
     }
 
-    console.info(
-      `[webhook] resolved project route project=${resolved.projectId} platform=${routeContext.platform} receiver_id=${routeContext.receiverId}`
-    );
+    logInfo(traceId, "[webhook] resolved project route", {
+      projectId: resolved.projectId,
+      platform: routeContext.platform,
+      receiverId: routeContext.receiverId,
+      entryIndex: index
+    });
 
     await forwardWithRetry(
       {
@@ -108,14 +162,17 @@ async function processWebhookPayload(payload, requestHeaders) {
         forward_url: resolved.forwardUrl
       },
       payload,
-      requestHeaders
+      requestHeaders,
+      traceId
     );
   });
 
   const results = await Promise.allSettled(tasks);
   results.forEach((result) => {
     if (result.status === "rejected") {
-      console.error("[webhook] async processing failed", result.reason?.message);
+      logError(traceId, "[webhook] async processing failed", {
+        error: result.reason?.message || "Unknown async processing failure"
+      });
     }
   });
 }

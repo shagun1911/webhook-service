@@ -6,6 +6,7 @@ const {
 } = require("./verifier");
 const { isKnownVerifyToken } = require("./clientStore");
 const { enqueueWebhookJob } = require("./queue");
+const { createTraceId, logInfo, logWarn } = require("./logger");
 
 const router = express.Router();
 
@@ -47,15 +48,23 @@ router.get("/meta/webhook", (req, res) => {
 });
 
 router.post("/meta/webhook", (req, res) => {
+  const traceId = req.get("x-request-id") || createTraceId();
   const signature256 = req.get("x-hub-signature-256");
   const signatureSha1 = req.get("x-hub-signature");
   const rawBody = req.body;
+
+  logInfo(traceId, "[webhook] received POST /meta/webhook", {
+    hasSha256: Boolean(signature256),
+    hasSha1: Boolean(signatureSha1),
+    contentLength: req.get("content-length") || null,
+    contentType: req.get("content-type") || null
+  });
 
   const isSignatureValid = APP_SECRETS.some((secret) =>
     validateMetaSignature(rawBody, signature256, signatureSha1, secret)
   );
   if (!isSignatureValid) {
-    console.warn("[webhook] signature validation failed", {
+    logWarn(traceId, "[webhook] signature validation failed", {
       hasSha256: Boolean(signature256),
       hasSha1: Boolean(signatureSha1),
       configuredAppSecrets: APP_SECRETS.length
@@ -67,14 +76,21 @@ router.post("/meta/webhook", (req, res) => {
   try {
     payload = JSON.parse(rawBody.toString("utf8"));
   } catch (error) {
-    console.warn("[webhook] invalid JSON payload");
+    logWarn(traceId, "[webhook] invalid JSON payload");
     return res.status(400).send("Invalid JSON");
   }
+
+  const entryCount = Array.isArray(payload?.entry) ? payload.entry.length : 0;
+  logInfo(traceId, "[webhook] payload parsed successfully", {
+    object: payload?.object || null,
+    entryCount
+  });
 
   // Acknowledge immediately, then process asynchronously.
   res.status(200).send("EVENT_RECEIVED");
 
-  enqueueWebhookJob(payload, req.headers);
+  logInfo(traceId, "[webhook] acknowledged to Meta, queueing async processing");
+  enqueueWebhookJob(payload, req.headers, traceId);
 
   return undefined;
 });

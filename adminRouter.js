@@ -6,6 +6,7 @@ const {
   updateClient,
   deleteClient
 } = require("./clientStore");
+const { getConfiguredProjects } = require("./dbClients");
 const {
   getResolverStats,
   resolveProjectWebhook,
@@ -49,6 +50,13 @@ router.delete("/clients/:id", (req, res) => {
   }
 
   return res.status(204).send();
+});
+
+router.get("/routing/projects", (_req, res) => {
+  res.status(200).json({
+    configuredProjects: getConfiguredProjects(),
+    resolver: getResolverStats()
+  });
 });
 
 router.get("/routing/debug", (req, res) => {

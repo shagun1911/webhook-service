@@ -1,4 +1,4 @@
-const { createProjectDbClients } = require("./dbClients");
+const { createProjectDbClients, getConfiguredProjects } = require("./dbClients");
 
 const PROJECT_INTEGRATIONS_COLLECTION = String(
   process.env.PROJECT_INTEGRATIONS_COLLECTION || "socialintegrations"
@@ -14,6 +14,7 @@ let resolverStats = {
   enabled: false,
   projectCount: 0,
   routeCount: 0,
+  projects: [],
   lastRefreshAt: null,
   lastRefreshError: null
 };
@@ -60,8 +61,10 @@ function readReceiverIds(platform, integrationDoc) {
 
 async function buildRoutingIndex() {
   const nextIndex = new Map();
+  const routesByProject = new Map();
 
   for (const project of projectDbClients) {
+    routesByProject.set(project.projectId, { instagram: 0, facebook: 0, whatsapp: 0 });
     const db = project.client.db();
     const collection = db.collection(PROJECT_INTEGRATIONS_COLLECTION);
 
@@ -102,6 +105,11 @@ async function buildRoutingIndex() {
               matchedField
             })
           );
+
+          const projectRoutes = routesByProject.get(project.projectId);
+          if (projectRoutes) {
+            projectRoutes[platform] += 1;
+          }
         });
       });
     }
@@ -112,6 +120,23 @@ async function buildRoutingIndex() {
     ...resolverStats,
     routeCount: routingIndex.size,
     projectCount: projectDbClients.length,
+    projects: projectDbClients.map((project) => {
+      const routeCounts = routesByProject.get(project.projectId) || {
+        instagram: 0,
+        facebook: 0,
+        whatsapp: 0
+      };
+      return {
+        projectId: project.projectId,
+        routeCounts,
+        totalRoutes: routeCounts.instagram + routeCounts.facebook + routeCounts.whatsapp,
+        backendWebhookUrls: {
+          instagram: Boolean(project.backendWebhookUrls.instagram),
+          facebook: Boolean(project.backendWebhookUrls.facebook),
+          whatsapp: Boolean(project.backendWebhookUrls.whatsapp)
+        }
+      };
+    }),
     lastRefreshAt: new Date().toISOString(),
     lastRefreshError: null
   };
@@ -134,12 +159,33 @@ async function initProjectResolver() {
   resolverStats.enabled = projectDbClients.length > 0;
 
   if (projectDbClients.length === 0) {
-    console.warn("[resolver] PROJECT_DBS_JSON is empty; resolver disabled");
+    console.warn("[resolver] no project databases configured; resolver disabled");
     return;
   }
 
+  const configuredProjects = getConfiguredProjects();
+  console.info(
+    `[resolver] loading ${configuredProjects.length} project database(s): ${configuredProjects
+      .map((project) => project.projectId)
+      .join(", ")}`
+  );
+  configuredProjects.forEach((project) => {
+    console.info(`[resolver] project=${project.projectId} downstream webhooks configured`, {
+      instagram: Boolean(project.backendWebhookUrls.instagram),
+      facebook: Boolean(project.backendWebhookUrls.facebook),
+      whatsapp: Boolean(project.backendWebhookUrls.whatsapp),
+      verifyTokenConfigured: project.verifyTokenConfigured
+    });
+  });
+
   await Promise.all(projectDbClients.map((project) => project.client.connect()));
   await refreshRoutingIndex();
+
+  console.info("[resolver] initial routing index built", {
+    projectCount: resolverStats.projectCount,
+    routeCount: resolverStats.routeCount,
+    projects: resolverStats.projects
+  });
 
   refreshTimer = setInterval(() => {
     refreshRoutingIndex().catch((error) => {
@@ -176,5 +222,6 @@ module.exports = {
   shutdownProjectResolver,
   resolveProjectWebhook,
   getResolverStats,
-  refreshRoutingIndex
+  refreshRoutingIndex,
+  getConfiguredProjects
 };

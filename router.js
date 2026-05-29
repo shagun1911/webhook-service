@@ -5,6 +5,7 @@ const {
   validateMetaSignature
 } = require("./verifier");
 const { isKnownVerifyToken } = require("./clientStore");
+const { isKnownProjectVerifyToken } = require("./dbClients");
 const { enqueueWebhookJob } = require("./queue");
 const { createTraceId, logInfo, logWarn } = require("./logger");
 
@@ -36,7 +37,8 @@ router.get("/meta/webhook", (req, res) => {
   const providedToken = req.query["hub.verify_token"];
   const isTokenValid =
     (VERIFY_TOKEN && providedToken === VERIFY_TOKEN) ||
-    isKnownVerifyToken(providedToken);
+    isKnownVerifyToken(providedToken) ||
+    isKnownProjectVerifyToken(providedToken);
 
   const result = validateWebhookVerification(req.query, isTokenValid ? providedToken : VERIFY_TOKEN);
   if (!result.ok) {

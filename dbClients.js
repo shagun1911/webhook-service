@@ -1,5 +1,7 @@
 const { MongoClient } = require("mongodb");
 
+let cachedProjectConfigs = [];
+
 function buildWebhookUrlsFromIndexedEnv(index) {
   const directJson = String(process.env[`PROJECT_BACKEND_WEBHOOK_URLS_${index}`] || "").trim();
   if (directJson) {
@@ -48,18 +50,37 @@ function parseIndexedProjectConfig() {
       throw new Error(`MONGODB_URI_${index} is empty`);
     }
 
+    const verifyToken = String(process.env[`PROJECT_VERIFY_TOKEN_${index}`] || "").trim();
+
     return {
       projectId,
       mongoUri,
+      verifyToken,
       backendWebhookUrls: buildWebhookUrlsFromIndexedEnv(index)
     };
   });
 }
 
+function assertUniqueProjectIds(configs) {
+  const seen = new Set();
+  configs.forEach((config) => {
+    if (seen.has(config.projectId)) {
+      throw new Error(`Duplicate projectId detected: ${config.projectId}`);
+    }
+    seen.add(config.projectId);
+  });
+}
+
+function cacheProjectConfigs(configs) {
+  assertUniqueProjectIds(configs);
+  cachedProjectConfigs = configs;
+  return configs;
+}
+
 function parseProjectDbsConfig() {
   const raw = String(process.env.PROJECT_DBS_JSON || "").trim();
   if (!raw) {
-    return parseIndexedProjectConfig();
+    return cacheProjectConfigs(parseIndexedProjectConfig());
   }
 
   let parsed;
@@ -73,7 +94,7 @@ function parseProjectDbsConfig() {
     throw new Error("PROJECT_DBS_JSON must be an array");
   }
 
-  return parsed.map((item) => {
+  const configs = parsed.map((item) => {
     const projectId = String(item.projectId || "").trim();
     const mongoUri = String(item.mongoUri || "").trim();
     const backendWebhookUrls = item.backendWebhookUrls || {};
@@ -82,9 +103,12 @@ function parseProjectDbsConfig() {
       throw new Error("Each PROJECT_DBS_JSON item requires projectId and mongoUri");
     }
 
+    const verifyToken = String(item.verifyToken || "").trim();
+
     return {
       projectId,
       mongoUri,
+      verifyToken,
       backendWebhookUrls: {
         instagram: String(backendWebhookUrls.instagram || "").trim(),
         facebook: String(backendWebhookUrls.facebook || "").trim(),
@@ -92,6 +116,29 @@ function parseProjectDbsConfig() {
       }
     };
   });
+
+  return cacheProjectConfigs(configs);
+}
+
+function isKnownProjectVerifyToken(token) {
+  const verifyToken = String(token || "").trim();
+  if (!verifyToken) {
+    return false;
+  }
+
+  return cachedProjectConfigs.some((config) => config.verifyToken && config.verifyToken === verifyToken);
+}
+
+function getConfiguredProjects() {
+  return cachedProjectConfigs.map((config) => ({
+    projectId: config.projectId,
+    verifyTokenConfigured: Boolean(config.verifyToken),
+    backendWebhookUrls: {
+      instagram: config.backendWebhookUrls.instagram || null,
+      facebook: config.backendWebhookUrls.facebook || null,
+      whatsapp: config.backendWebhookUrls.whatsapp || null
+    }
+  }));
 }
 
 function createProjectDbClients() {
@@ -106,5 +153,7 @@ function createProjectDbClients() {
 
 module.exports = {
   parseProjectDbsConfig,
-  createProjectDbClients
+  createProjectDbClients,
+  isKnownProjectVerifyToken,
+  getConfiguredProjects
 };
